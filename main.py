@@ -107,7 +107,6 @@ def sendRoutingTable(neighborIP, neighborPORT, neighborEMAIL):
     pWholeType = '\x09' if args.encryption else '\x01'
     if args.encryption: 
         message = Encryption.encrypt(message)
-    print "Send message length: " + str(len(message))
     if len(message) > 59:
         left = len(message) % 47
         packageNumbers = (len(message) - left) / 47
@@ -137,13 +136,19 @@ def sendRoutingTable(neighborIP, neighborPORT, neighborEMAIL):
     pass
 
 
-def sendMessage(event=None):
+def sendMessage(event=None, filePath=''):
     global sock
     message = my_msg.get()
 
     if message == "{list_nodes}":
         listAllNodes()
         return
+
+    message = '\x01' + message
+
+    if len(filePath) > 0:
+        message = open(filePath, 'rb').read()
+        message = '\x02' + message
 
     dest_to = destin_select.get()
 
@@ -261,7 +266,6 @@ def parseMessage():
                 sendAck(data[1:3], source, addr[0], addr[1])
                 if message:
                     sendBack = False
-
                     if not any(d['nextHop'] == source for d in routingTable):
                         msg_list.insert(END, "Neighbor " + knownTable[source]['email'] + " connected")
                         neighbors.append(addr[0] + ":"+ str(addr[1]) + ":" + knownTable[source]['email'])
@@ -284,12 +288,24 @@ def parseMessage():
                     message = parseChunking(data)
                 else:
                     message = data[41:]
+
+                sendAck(data[1:3], source, addr[0], addr[1])   
                 if message is not None:
-                    from_email = knownTable[source]['email']
-                    print "Received message length: " + str(len(message))
+
                     if data[40] in ['\x0E', '\x0A']: message = Encryption.decrypt(message)
+
+                    messageType = message[0]
+                    message = message[1:]
+                    
+                    if messageType == '\x02':
+                        f = open('output.file', 'wb')
+                        f.write(message)
+                        f.close()
+                        continue
+
+                    from_email = knownTable[source]['email']
+                    
                     msg_list.insert(END, from_email + ': ' + message)
-                    sendAck(data[1:3], source, addr[0], addr[1])
 
         elif data[3] == '\x04':
             dest_addr = addr[0] + ":" + str(addr[1])
@@ -369,6 +385,12 @@ def listAllNodes():
         msg_list.insert(END, knownTable[email]['email'])
     pass
 
+def sendFile(event = None):
+    from tkFileDialog import askopenfilename
+    filePath = askopenfilename()
+    sendMessage(None, filePath)
+    return
+
 
 def disconnect():
     global sock
@@ -408,6 +430,8 @@ dest_field = Entry(root, textvariable=destin_select)
 dest_field.pack()
 send_button = Button(root, text="Send", command=sendMessage) #command=send
 send_button.pack()
+file_button = Button(root, text="Send file", command=sendFile)
+file_button.pack()
 
 root.protocol('WM_DELETE_WINDOW', on_closing)
 
