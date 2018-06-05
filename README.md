@@ -19,14 +19,14 @@ You need to specify the port, email, known email in the network.
 When firing the second node, you will also need to state the active neighbor to whom you want to connect.
 
 #### Example on how to run
-*1st terminal:* python main.py <br/>
+*1st terminal:* **python main.py** <br/>
 This will create a node using default parameters: <br/>
 port 9999, email akim.essen@ttu.ee, known list of email ['127.0.0.1:9999:akim.essen@ttu.ee', '127.0.0.1:9998:essen@ttu.ee', '127.0.0.1:9997:test@ttu.ee']
 
-*2nd terminal:* python main.py -p 9998 -e essen@ttu.ee -n 127.0.0.1:9999:akim.essen@ttu.ee <br/>
+*2nd terminal:* **python main.py -p 9998 -e essen@ttu.ee -n 127.0.0.1:9999:akim.essen@ttu.ee** <br/>
 This will create a second node, with default known emails and connect to neighbor akim.essen@ttu.ee <br/>
 
-*3rd terminal:* python main.py -p 9997 -e test@ttu.ee -n 127.0.0.1:9998:essen@ttu.ee <br/>
+*3rd terminal:* **python main.py -p 9997 -e test@ttu.ee -n 127.0.0.1:9998:essen@ttu.ee** <br/>
 This will create a second node, with default known emails and connect to neighbor essen@ttu.ee <br/>
 
 ### GUI
