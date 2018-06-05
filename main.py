@@ -103,7 +103,10 @@ def sendPacket(packet, neighborIP, neighborPORT, packetNumber):
 
 def sendRoutingTable(neighborIP, neighborPORT, neighborEMAIL):
     message = retrieveRoutingTable()
-    if args.encryption: message = Encryption.encrypt(message)
+    pChunkedType = '\x0D' if args.encryption else '\x05' 
+    pWholeType = '\x09' if args.encryption else '\x01'
+    if args.encryption: 
+        message = Encryption.encrypt(message)
     print "Send message length: " + str(len(message))
     if len(message) > 59:
         left = len(message) % 47
@@ -115,19 +118,19 @@ def sendRoutingTable(neighborIP, neighborPORT, neighborEMAIL):
             packetNumber = 0
             if left == 0 and x == packageNumbers - 1:
                 packet, packetNumber = buildPacket('\x02', '\x0F', '\x00\x00',
-                                 neighborEMAIL, '\x09', buildChunkedPayload(streamId, x, msg, '\x01'), neighborIP, neighborPORT)
+                                 neighborEMAIL, pChunkedType, buildChunkedPayload(streamId, x, msg, '\x01'), neighborIP, neighborPORT)
             else:
                 packet, packetNumber = buildPacket('\x02', '\x0F', '\x00\x00',
-                                 neighborEMAIL, '\x09', buildChunkedPayload(streamId, x, msg), neighborIP, neighborPORT)
+                                 neighborEMAIL, pChunkedType, buildChunkedPayload(streamId, x, msg), neighborIP, neighborPORT)
             
             sendPacket(packet, neighborIP, neighborPORT ,packetNumber)
         if left > 0:
             packet, packetNumber = buildPacket('\x02', '\x0F', '\x00\x00',  neighborEMAIL,
-                                 '\x09', buildChunkedPayload(streamId, packageNumbers, message[packageNumbers*47:], '\x01'), neighborIP, neighborPORT)
+                                 pChunkedType, buildChunkedPayload(streamId, packageNumbers, message[packageNumbers*47:], '\x01'), neighborIP, neighborPORT)
             sendPacket(packet, neighborIP, neighborPORT ,packetNumber)
     else:
         packet, packetNumber = buildPacket('\x02', '\x0F',
-                             '\x00\x00',  neighborEMAIL, '\x01', message, neighborIP, neighborPORT)
+                             '\x00\x00',  neighborEMAIL, pWholeType, message, neighborIP, neighborPORT)
         sendPacket(packet, neighborIP, neighborPORT ,packetNumber)
     #packet = buildPacket('\x00\x01', '\x02', '\x0F', '\x00\x00',neighborEMAIL, '\x01', message)
     #sock.sendto(packet, (neighborIP, neighborPORT))
@@ -155,6 +158,8 @@ def sendMessage(event=None):
     kDest = knownTable[destHash]
     msg_list.insert(END, "me: " + message)
     my_msg.set("")
+    pChunkedType = '\x0E' if args.encryption else '\x06' 
+    pWholeType = '\x0A' if args.encryption else '\x02'
     if args.encryption: message = Encryption.encrypt(message)
 
     if len(message) > 59:
@@ -167,26 +172,28 @@ def sendMessage(event=None):
             packetNumber = 0
             if left == 0 and x == packageNumbers - 1:
                 packet, packetNumber = buildPacket('\x02', '\x0F', '\x00\x00',
-                                 destHash, '\x0A', buildChunkedPayload(streamId, x, msg, '\x01'), kDest['IP'], kDest['PORT'])
+                                 destHash, pChunkedType, buildChunkedPayload(streamId, x, msg, '\x01'), kDest['IP'], kDest['PORT'])
             else:
                 packet, packetNumber = buildPacket('\x02', '\x0F', '\x00\x00',
-                                 destHash, '\x0A', buildChunkedPayload(streamId, x, msg), kDest['IP'], kDest['PORT'])
+                                 destHash, pChunkedType, buildChunkedPayload(streamId, x, msg), kDest['IP'], kDest['PORT'])
             sendPacket(packet,  kDest['IP'], kDest['PORT'] ,packetNumber)
         if left > 0:
             packet, packetNumber = buildPacket('\x02', '\x0F', '\x00\x00',  destHash,
-                                 '\x0A', buildChunkedPayload(streamId, packageNumbers, message[packageNumbers*47:], '\x01'), kDest['IP'], kDest['PORT'])
+                                 pChunkedType, buildChunkedPayload(streamId, packageNumbers, message[packageNumbers*47:], '\x01'), kDest['IP'], kDest['PORT'])
             sendPacket(packet,  kDest['IP'], kDest['PORT'] ,packetNumber)
     else:
         packet, packetNumber = buildPacket('\x02', '\x0F',
-                             '\x00\x00',  destHash, '\x02', message, kDest['IP'], kDest['PORT'])
+                             '\x00\x00',  destHash, pWholeType, message, kDest['IP'], kDest['PORT'])
         sendPacket(packet,  kDest['IP'], kDest['PORT'] ,packetNumber)
     pass
-# encrypted 00001000
-# chunked   00000100
-# data      00000010
-# routing   00000001
+# encrypted 00001000 00001000
+# chunked   00000100 00001100
+# data      00000010 00001110
+# routing   00000001 00001101
 
 def broadcastMessage(message):
+    pChunkedType = '\x0E' if args.encryption else '\x06' 
+    pWholeType = '\x0A' if args.encryption else '\x02'
     for route in minifiedTable:
         if route['destination'] == sourceAddress: continue
         rEMAIL = route['destination']
@@ -202,18 +209,18 @@ def broadcastMessage(message):
                 packetNumber = 0
                 if left == 0 and x == packageNumbers - 1:
                     packet, packetNumber = buildPacket('\x02', '\x0F', '\x00\x00',
-                                    rEMAIL, '\x0A', buildChunkedPayload(streamId, x, msg, '\x01'), rIP, rPORT)
+                                    rEMAIL, pChunkedType, buildChunkedPayload(streamId, x, msg, '\x01'), rIP, rPORT)
                 else:
                     packet, packetNumber = buildPacket('\x02', '\x0F', '\x00\x00',
-                                    rEMAIL, '\x0A', buildChunkedPayload(streamId, x, msg), rIP, rPORT)
+                                    rEMAIL, pChunkedType, buildChunkedPayload(streamId, x, msg), rIP, rPORT)
                 sendPacket(packet,  rIP, rPORT ,packetNumber)
         if left > 0:
             packet, packetNumber = buildPacket('\x02', '\x0F', '\x00\x00',  rEMAIL,
-                                 '\x0A', buildChunkedPayload(streamId, packageNumbers, message[packageNumbers*47:], '\x01'), rIP, rPORT)
+                                 pChunkedType, buildChunkedPayload(streamId, packageNumbers, message[packageNumbers*47:], '\x01'), rIP, rPORT)
             sendPacket(packet,  rIP, rPORT ,packetNumber)
         else:
             packet, packetNumber = buildPacket('\x02', '\x0F',
-                                '\x00\x00',  rEMAIL, '\x02', message, rIP, rPORT)
+                                '\x00\x00',  rEMAIL, pWholeType, message, rIP, rPORT)
             sendPacket(packet,  rIP, rPORT ,packetNumber)
 
 def retransmitPacket():
@@ -236,7 +243,6 @@ def retransmitPacket():
 def parseMessage():
     while True:
         data, addr = sock.recvfrom(100)
-
         # MESSAGE TYPE 02 = Data, 04 = ACK
         if data[3] == '\x02':
             source = data[8:24]
@@ -245,14 +251,13 @@ def parseMessage():
             if sourceAddress != destination:
                 routePacket(data, destination)
 
-            if data[40] == '\x01' or data[40] == '\x09':
+            if data[40] in ['\x05', '\x0D', '\x01', '\x09']:
                 message = ''
-                if data[40] == '\x09':
+                if data[40] in ['\x05', '\x0D']:
                     message = parseChunking(data)
                 else:
                     message = data[41:]
 
-                #address = addr[0] + ':' + str(addr[1])
                 sendAck(data[1:3], source, addr[0], addr[1])
                 if message:
                     sendBack = False
@@ -262,32 +267,29 @@ def parseMessage():
                         neighbors.append(addr[0] + ":"+ str(addr[1]) + ":" + knownTable[source]['email'])
                         sendBack = True
 
-                    if len(message) == 0:
-                        #127.0.0.1:9999:akim.essen@ttu.ee
+                    if len(message) == 0 or message == '\x00':
                         neighborToRemove = addr[0] + ":" + str(addr[1]) + ":" + knownTable[source]['email']
                         idx = neighbors.index(neighborToRemove)
                         del neighbors[idx]
 
-                    if args.encryption: message = Encryption.decrypt(message)
+                    if data[40] in ['\x0D', '\x09']: message = Encryption.decrypt(message)
                     updateRoutingTable(message, source)
                     if sendBack:
                         sendRoutingTable(addr[0], addr[1], source)
                         
 
-            elif data[40] == '\x02' or data[40] == '\x0A':
+            elif data[40] in ['\x06', '\x0E', '\x02', '\x0A']:
                 message = None
-                if data[40] == '\x0A':
+                if data[40] in ['\x06', '\x0E']:
                     message = parseChunking(data)
                 else:
                     message = data[41:]
                 if message is not None:
                     from_email = knownTable[source]['email']
                     print "Received message length: " + str(len(message))
-                    if args.encryption: message = Encryption.decrypt(message)
+                    if data[40] in ['\x0E', '\x0A']: message = Encryption.decrypt(message)
                     msg_list.insert(END, from_email + ': ' + message)
                     sendAck(data[1:3], source, addr[0], addr[1])
-            elif data[40] == '\x08':
-                print 'encrypted'
 
         elif data[3] == '\x04':
             dest_addr = addr[0] + ":" + str(addr[1])
@@ -319,15 +321,15 @@ def routePacket(data, dest):
         if dest in knownTable:
             pckNum = bn(data[1:3])
             sendPacket(data, knownTable[dest]['IP'], knownTable[dest]['PORT'], pckNum)
-
     pass
 
 
 def updateRoutingTable(message, source):
     global updateTable, routingTable
-    print routingTable
-    if len(message) == 0:
-        routingTable[:] = [d for d in routingTable if d.get('nextHop') != source]
+    if len(message) == 0 or message == '\x00':
+        routingTable[:] = [d for d in routingTable if d.get('nextHop') != source or d.get('destination') != source]
+        updateTable = True
+        retrieveRoutingTable()
     else:
         numberOfRoutes = len(message) / 17
         routingTable[:] = [d for d in routingTable if d.get('nextHop') != source]
@@ -335,12 +337,6 @@ def updateRoutingTable(message, source):
             route = message[17*x : 17 * (x+1)]
             cost = bn(route[16])
             email = route[:16]
-            #cost = bn(message[16 * (x+1)])
-            #email = message[17*x : 16 * (x+1)]
-            # em = knownTable[email]['email']
-            # check = [d for d in neighbors if em in d]
-            # if len(check) == 0:
-            #     cost = cost + 1
             if email != sourceAddress:
                 routingTable.append({
                     'destination': email,
@@ -380,13 +376,14 @@ def disconnect():
         neighborIP, neighborPORT, neighborEMAIL = neighbor.split(':')
         neighborPORT = int(neighborPORT)
         neighborEMAIL = md5.new(neighborEMAIL).digest()
-        packet, _ = buildPacket('\x02', '\x0F', '\x00\x00',  neighborEMAIL, '\x02', '', neighborIP, neighborPORT)
+        packet, _ = buildPacket('\x02', '\x0F', '\x00\x00',  neighborEMAIL, '\x01', '\x00', neighborIP, neighborPORT)
         sock.sendto(packet, (neighborIP, neighborPORT))
+    return
 
 def on_closing(event=None):
     disconnect()
-    sock.close()
     root.destroy()
+    sock.close()
     pass
 
 root = Tk()
