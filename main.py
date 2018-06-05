@@ -14,14 +14,25 @@ parser.add_argument('-en', '--encryption', default=True, type=bool, help='Enable
 
 args = parser.parse_args()
 
-# global variables
+'''
+Global variables:
+updateTable - do we need to update the optimized version of the routing table
+version - packet version
+sourceAddress - hash of our email
+routingTable - full routing table, holds all routes as {'destination', 'nextHop', 'metric'}
+minifiedTable - optimized table for routing
+routingMessage - optimized table for sending to neighbor
+knownTable - known emails, which could appear in the network. This is used, because we receive the hash of email and we need to real email
+chunkingHistory - keep track of chunking
+ackHistory - keep track of ACKs that we are waiting for
+neighbors - our node neighbors
+'''
 updateTable = True
 version = '\x01'
 sourceAddress = md5.new(args.email).digest()
 routingTable = []
 minifiedTable = []
 routingMessage = ''
-emailIPtable = {}
 knownTable={}
 chunkingHistory = {}
 ackHistory = {}
@@ -30,7 +41,11 @@ neighbors = args.neighbors
 UDP_IP = '127.0.0.1'
 UDP_PORT = args.port
 
-
+'''
+Init function.
+1) Create an object for known emails in the network. So we could map hash email to plain email.
+2) Send init tables to each neigbor stated
+'''
 def init():
 
     if not os.path.isfile("first.asc"):
@@ -59,7 +74,10 @@ def init():
         sendRoutingTable(neighborIP, neighborPORT, neighborEMAIL)
     pass
 
-
+'''
+Create a packet for sending.
+Here we also check what next packet number should be.
+'''
 def buildPacket(packetType, ttl, confID, destAdd, layer4Type, payload, dIP, dPORT):
     packetNumber = 0
     if destAdd in ackHistory:
@@ -70,7 +88,9 @@ def buildPacket(packetType, ttl, confID, destAdd, layer4Type, payload, dIP, dPOR
     packet = layer3 + layer4Type + payload
     return packet, packetNumber
 
-
+'''
+Send the ACK packet back to sender.
+'''
 def sendAck(packetNumber, destinationAddress, nIP, nPORT):
     global sock
     packet, _ = buildPacket('\x04', nb(15,1), packetNumber, '\x00', sourceAddress, destinationAddress, nIP, nPORT)
@@ -80,7 +100,10 @@ def sendAck(packetNumber, destinationAddress, nIP, nPORT):
 def buildChunkedPayload(streamId, chunkId, payload, status='\x00'):
     return status + nb(streamId, 3) + nb(chunkId, 8) + payload
 
-
+'''
+This function will broadcast the routing table to each neighbor.
+Every 30 seconds.
+'''
 def broadcastRoutingTable():
     while True:
         for neighbor in neighbors:
@@ -91,6 +114,10 @@ def broadcastRoutingTable():
         time.sleep(30)
     pass
 
+'''
+Function will send the packet to destination.
+Init the ttl, so we could drop the packet after 15 retries.
+'''
 def sendPacket(packet, neighborIP, neighborPORT, packetNumber):
     dest = neighborIP + ":" + str(neighborPORT)
     if dest not in ackHistory:
@@ -101,6 +128,12 @@ def sendPacket(packet, neighborIP, neighborPORT, packetNumber):
     }
     sock.sendto(packet, (neighborIP, neighborPORT))
 
+'''
+Send routing table to destination.
+1) Retrieve minified routing table
+2) Decide on packet type, depending on if it is encrypted
+3) Depending on the size of the message, chunk it
+'''
 def sendRoutingTable(neighborIP, neighborPORT, neighborEMAIL):
     message = retrieveRoutingTable()
     pChunkedType = '\x0D' if args.encryption else '\x05' 
@@ -131,11 +164,16 @@ def sendRoutingTable(neighborIP, neighborPORT, neighborEMAIL):
         packet, packetNumber = buildPacket('\x02', '\x0F',
                              '\x00\x00',  neighborEMAIL, pWholeType, message, neighborIP, neighborPORT)
         sendPacket(packet, neighborIP, neighborPORT ,packetNumber)
-    #packet = buildPacket('\x00\x01', '\x02', '\x0F', '\x00\x00',neighborEMAIL, '\x01', message)
-    #sock.sendto(packet, (neighborIP, neighborPORT))
     pass
 
-
+'''
+Function which will send the message written in the GUI to the destination.
+Also, it can will send the file, if stated.
+1) {list_nodes} list all nodes
+2) {to_all} broadcast message
+3) Decide on packet type depending on encryption
+4) Send message, depending on it needs to be chunked or not
+'''
 def sendMessage(event=None, filePath=''):
     global sock
     message = my_msg.get()
@@ -191,11 +229,11 @@ def sendMessage(event=None, filePath=''):
                              '\x00\x00',  destHash, pWholeType, message, kDest['IP'], kDest['PORT'])
         sendPacket(packet,  kDest['IP'], kDest['PORT'] ,packetNumber)
     pass
-# encrypted 00001000 00001000
-# chunked   00000100 00001100
-# data      00000010 00001110
-# routing   00000001 00001101
 
+
+'''
+Same as send message, only it will broadcast the message to all nodes.
+'''
 def broadcastMessage(message):
     pChunkedType = '\x0E' if args.encryption else '\x06' 
     pWholeType = '\x0A' if args.encryption else '\x02'
@@ -228,6 +266,10 @@ def broadcastMessage(message):
                                 '\x00\x00',  rEMAIL, pWholeType, message, rIP, rPORT)
             sendPacket(packet,  rIP, rPORT ,packetNumber)
 
+'''
+Will retransmit packet if ACK is not received in 2 seconds.
+Check ttl, if the 16th try, then drop the packet.
+'''
 def retransmitPacket():
     global sock
     time.sleep(2)
@@ -244,7 +286,14 @@ def retransmitPacket():
             time.sleep(2)
     pass
 
-
+'''
+This will read incoming packets.
+1) If DATA (routing or message) or ACK
+2) If routing or message
+3) If routing then add neighbor if new source and add to routing table, or update the existing routing table 
+4) If message then print the message in the GUI
+5) If file then create the file. The name of the file is output.file
+'''
 def parseMessage():
     while True:
         data, addr = sock.recvfrom(100)
@@ -314,6 +363,9 @@ def parseMessage():
                  del ackHistory[dest_addr][packetConfId]
     pass
 
+'''
+This function will parse the chunked message, to make sure they are correctly added to each other.
+'''
 def parseChunking(data):
     if data[42:45] in chunkingHistory:
         if chunkingHistory[data[42:45]]['chunkId'] + 1 == bn(data[45:53]):
@@ -330,6 +382,9 @@ def parseChunking(data):
         }
     pass
 
+'''
+This function will route the packet further
+'''
 def routePacket(data, dest):
     ttl = bn(data[4]) - 1
     if ttl > 0:
@@ -339,7 +394,10 @@ def routePacket(data, dest):
             sendPacket(data, knownTable[dest]['IP'], knownTable[dest]['PORT'], pckNum)
     pass
 
-
+'''
+This function will update the full routing table.
+Also, it will remove the node if the node disconnects.
+'''
 def updateRoutingTable(message, source):
     global updateTable, routingTable
     if len(message) == 0 or message == '\x00':
@@ -363,7 +421,9 @@ def updateRoutingTable(message, source):
         retrieveRoutingTable()
     pass
 
-
+'''
+This function will create a minified routing table, for local processing and for sending it futher to other nodes.
+'''
 def retrieveRoutingTable():
     global updateTable, routingMessage, minifiedTable
     if updateTable == True:
@@ -378,6 +438,9 @@ def retrieveRoutingTable():
     updateTable = False
     return routingMessage
 
+'''
+This function will list all active nodes in the GUI.
+'''
 def listAllNodes():
     msg_list.insert(END, "List of all active nodes known:")
     for route in minifiedTable:
@@ -385,13 +448,19 @@ def listAllNodes():
         msg_list.insert(END, knownTable[email]['email'])
     pass
 
+'''
+This function will create a browse window, and once the file selected
+it will send it automatically further.
+'''
 def sendFile(event = None):
     from tkFileDialog import askopenfilename
     filePath = askopenfilename()
     sendMessage(None, filePath)
     return
 
-
+'''
+Send empty table to neighbors, so they would know you disconnected
+'''
 def disconnect():
     global sock
     for neighbor in neighbors:
@@ -402,6 +471,12 @@ def disconnect():
         sock.sendto(packet, (neighborIP, neighborPORT))
     return
 
+'''
+This function fires when closing the GUI window.
+1) Send empty table to all neighbors
+2) Destroy GUI window
+3) Close socket
+'''
 def on_closing(event=None):
     disconnect()
     root.destroy()

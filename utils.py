@@ -6,7 +6,9 @@ def bitstring_to_bytes(s):
         b.append(v & 0xff)
         v >>= 8
     return bytes(b[::-1])
-
+'''
+Integer to bytes
+'''
 def nb(i, length=0):
     bytes = ""
     for _ in xrange(length):
@@ -14,6 +16,9 @@ def nb(i, length=0):
         i >>= 8
     return bytes
 
+'''
+Bytes to integer
+'''
 def bn(bytes):
     num = 0
     for byte in bytes:
