@@ -26,7 +26,7 @@ class Encryption:
         usage={KeyFlags.Sign, KeyFlags.EncryptCommunications, KeyFlags.EncryptStorage},
         hashes=[HashAlgorithm.SHA512],
         ciphers=[PubKeyAlgorithm.RSAEncryptOrSign, SymmetricKeyAlgorithm.AES128],
-        compression=[CompressionAlgorithm.Uncompressed])
+        compression=[CompressionAlgorithm.ZLIB, CompressionAlgorithm.BZ2, CompressionAlgorithm.ZIP, CompressionAlgorithm.Uncompressed])
       open('{}.asc'.format(pair_name), 'wb').write(bytes(key))
  
   @staticmethod

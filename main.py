@@ -6,11 +6,9 @@ from Tkinter import *
 
 #, default=["127.0.0.1:9999:akim.essen@ttu.ee"]
 parser = argparse.ArgumentParser(description='Network Protocol built on UDP')
-parser.add_argument('-p', '--port', default=9999, type=int,
-                    help='Port to listen (default 9999)')
+parser.add_argument('-p', '--port', default=9999, type=int,help='Port to listen (default 9999)')
 parser.add_argument('-n', '--neighbors', default=[], nargs='+', help='Neighbors IP and Ports')
-parser.add_argument(
-    '-e', '--email', default="akim.essen@ttu.ee", help="TTU email")
+parser.add_argument('-e', '--email', default="akim.essen@ttu.ee", help="TTU email")
 parser.add_argument('-k', '--known', default=['127.0.0.1:9999:akim.essen@ttu.ee', '127.0.0.1:9998:essen@ttu.ee', '127.0.0.1:9997:test@ttu.ee'], nargs='+', help='Known list of nodes')
 parser.add_argument('-en', '--encryption', default=True, type=bool, help='Enable Encryption')
 
@@ -21,6 +19,7 @@ updateTable = True
 version = '\x01'
 sourceAddress = md5.new(args.email).digest()
 routingTable = []
+minifiedTable = []
 routingMessage = ''
 emailIPtable = {}
 knownTable={}
@@ -47,15 +46,16 @@ def init():
             'PORT': int(kPORT)
         }
 
+    routingTable.append({
+            'destination': sourceAddress,
+            'nextHop': sourceAddress,
+            'metric': 0
+    })
+
     for neighbor in neighbors:
         neighborIP, neighborPORT, neighborEMAIL = neighbor.split(':')
         neighborPORT = int(neighborPORT)
         neighborEMAIL = md5.new(neighborEMAIL).digest()
-        routingTable.append({
-            'destination': neighborEMAIL,
-            'nextHop': neighborEMAIL,
-            'metric': 1
-        })
         sendRoutingTable(neighborIP, neighborPORT, neighborEMAIL)
     pass
 
@@ -74,7 +74,6 @@ def buildPacket(packetType, ttl, confID, destAdd, layer4Type, payload, dIP, dPOR
 def sendAck(packetNumber, destinationAddress, nIP, nPORT):
     global sock
     packet, _ = buildPacket('\x04', nb(15,1), packetNumber, '\x00', sourceAddress, destinationAddress, nIP, nPORT)
-    print nIP, nPORT
     sock.sendto(packet, (nIP, nPORT))
     pass
 
@@ -138,7 +137,20 @@ def sendRoutingTable(neighborIP, neighborPORT, neighborEMAIL):
 def sendMessage(event=None):
     global sock
     message = my_msg.get()
+
+    if message == "{list_nodes}":
+        listAllNodes()
+        return
+
     dest_to = destin_select.get()
+
+    if dest_to == "{to_all}":
+        msg_list.insert(END, "me: " + message)
+        my_msg.set("")
+        if args.encryption: message = Encryption.encrypt(message)
+        broadcastMessage(message)
+        return
+
     destHash = md5.new(dest_to).digest()
     kDest = knownTable[destHash]
     msg_list.insert(END, "me: " + message)
@@ -174,6 +186,36 @@ def sendMessage(event=None):
 # data      00000010
 # routing   00000001
 
+def broadcastMessage(message):
+    for route in minifiedTable:
+        if route['destination'] == sourceAddress: continue
+        rEMAIL = route['destination']
+        rIP = knownTable[rEMAIL]['IP']
+        rPORT = knownTable[rEMAIL]['PORT']
+        if len(message) > 59:
+            left = len(message) % 47
+            packageNumbers = (len(message) - left) / 47
+            for x in xrange(packageNumbers):
+                msg = message[x*47:(x+1)*47]
+                streamId = 0
+                packet = None 
+                packetNumber = 0
+                if left == 0 and x == packageNumbers - 1:
+                    packet, packetNumber = buildPacket('\x02', '\x0F', '\x00\x00',
+                                    rEMAIL, '\x0A', buildChunkedPayload(streamId, x, msg, '\x01'), rIP, rPORT)
+                else:
+                    packet, packetNumber = buildPacket('\x02', '\x0F', '\x00\x00',
+                                    rEMAIL, '\x0A', buildChunkedPayload(streamId, x, msg), rIP, rPORT)
+                sendPacket(packet,  rIP, rPORT ,packetNumber)
+        if left > 0:
+            packet, packetNumber = buildPacket('\x02', '\x0F', '\x00\x00',  rEMAIL,
+                                 '\x0A', buildChunkedPayload(streamId, packageNumbers, message[packageNumbers*47:], '\x01'), rIP, rPORT)
+            sendPacket(packet,  rIP, rPORT ,packetNumber)
+        else:
+            packet, packetNumber = buildPacket('\x02', '\x0F',
+                                '\x00\x00',  rEMAIL, '\x02', message, rIP, rPORT)
+            sendPacket(packet,  rIP, rPORT ,packetNumber)
+
 def retransmitPacket():
     global sock
     time.sleep(2)
@@ -181,7 +223,6 @@ def retransmitPacket():
     for dest, _ in ackHistoryCopy.iteritems():
         destIP, destPORT = dest.split(':')
         for pckNum, pckObj  in ackHistoryCopy[dest].iteritems():
-            print pckNum, pckObj
             ttl = pckObj['ttl'] + 1
             if ttl >= 16:
                 del ackHistory[dest][pckNum]
@@ -205,7 +246,6 @@ def parseMessage():
                 routePacket(data, destination)
 
             if data[40] == '\x01' or data[40] == '\x09':
-                print 'routing full'
                 message = ''
                 if data[40] == '\x09':
                     message = parseChunking(data)
@@ -216,12 +256,18 @@ def parseMessage():
                 sendAck(data[1:3], source, addr[0], addr[1])
                 if message:
                     sendBack = False
+
                     if not any(d['nextHop'] == source for d in routingTable):
                         msg_list.insert(END, "Neighbor " + knownTable[source]['email'] + " connected")
                         neighbors.append(addr[0] + ":"+ str(addr[1]) + ":" + knownTable[source]['email'])
                         sendBack = True
-                        
-                    print "Received message length: " + str(len(message))
+
+                    if len(message) == 0:
+                        #127.0.0.1:9999:akim.essen@ttu.ee
+                        neighborToRemove = addr[0] + ":" + str(addr[1]) + ":" + knownTable[source]['email']
+                        idx = neighbors.index(neighborToRemove)
+                        del neighbors[idx]
+
                     if args.encryption: message = Encryption.decrypt(message)
                     updateRoutingTable(message, source)
                     if sendBack:
@@ -229,7 +275,6 @@ def parseMessage():
                         
 
             elif data[40] == '\x02' or data[40] == '\x0A':
-                print 'data'
                 message = None
                 if data[40] == '\x0A':
                     message = parseChunking(data)
@@ -245,7 +290,6 @@ def parseMessage():
                 print 'encrypted'
 
         elif data[3] == '\x04':
-            print "ACK"
             dest_addr = addr[0] + ":" + str(addr[1])
             packetConfId = bn(data[5:7])
             if dest_addr in ackHistory and packetConfId in ackHistory[dest_addr]:
@@ -257,7 +301,6 @@ def parseChunking(data):
         if chunkingHistory[data[42:45]]['chunkId'] + 1 == bn(data[45:53]):
             chunkingHistory[data[42:45]]['chunkId'] += 1
             chunkingHistory[data[42:45]]['message'] += data[53:]
-            print data[41] == '\x01'
             if data[41] == '\x01':
                 result = chunkingHistory[data[42:45]]['message']
                 del chunkingHistory[data[42:45]]
@@ -281,56 +324,70 @@ def routePacket(data, dest):
 
 
 def updateRoutingTable(message, source):
-    global updateTable
-    # ADD TO TABLE
-    numberOfRoutes = len(message) / 17
-    # if source in routingTable:
-    #     routingTable[source] = []
-    for x in xrange(numberOfRoutes):
-        cost = bn(message[16 * (x+1)])
-        email = message[:16 * (x+1)]
-        check = [r for r in routingTable if r['destination']
-                 == email and r['nextHop'] == source]
-        if len(check) > 0 and check[0]['metric'] > cost:
-            idx = routingTable.index(check[0])
-            del routingTable[idx]
-            routingTable.append({
-                'destination': email,
-                'nextHop': source,
-                'metric': cost + 1
-            })
+    global updateTable, routingTable
+    print routingTable
+    if len(message) == 0:
+        routingTable[:] = [d for d in routingTable if d.get('nextHop') != source]
+    else:
+        numberOfRoutes = len(message) / 17
+        routingTable[:] = [d for d in routingTable if d.get('nextHop') != source]
+        for x in xrange(numberOfRoutes):
+            route = message[17*x : 17 * (x+1)]
+            cost = bn(route[16])
+            email = route[:16]
+            #cost = bn(message[16 * (x+1)])
+            #email = message[17*x : 16 * (x+1)]
+            # em = knownTable[email]['email']
+            # check = [d for d in neighbors if em in d]
+            # if len(check) == 0:
+            #     cost = cost + 1
+            if email != sourceAddress:
+                routingTable.append({
+                    'destination': email,
+                    'nextHop': source,
+                    'metric': cost + 1
+                })
             updateTable = True
-        elif len(check) == 0:
-            routingTable.append({
-                'destination': email,
-                'nextHop': source,
-                'metric': cost + 1
-            })
-            updateTable = True
-        # routingTable[source].append([email, cost, priority])
-    #print routingTable
+        retrieveRoutingTable()
     pass
 
 
 def retrieveRoutingTable():
-    global updateTable, routingMessage
-    minifiedTable = []
+    global updateTable, routingMessage, minifiedTable
     if updateTable == True:
+        minifiedTable = []
         routingMessage = ''
         for route in routingTable:
             if not any(m['destination'] == route['destination'] for m in minifiedTable):
-                sameDest = [
-                    d for d in routingTable if route['destination'] == d['destination']]
+                sameDest = [d for d in routingTable if route['destination'] == d['destination']]
                 minCostRoute = min(sameDest, key=lambda x: x['metric'])
                 minifiedTable.append(minCostRoute)
-                routingMessage += minCostRoute['destination'] + \
-                    nb(minCostRoute['metric'], 1)
+                routingMessage += minCostRoute['destination'] + nb(minCostRoute['metric'], 1)
     updateTable = False
     return routingMessage
 
+def listAllNodes():
+    msg_list.insert(END, "List of all active nodes known:")
+    for route in minifiedTable:
+        email = route['destination']
+        msg_list.insert(END, knownTable[email]['email'])
+    pass
+
+
+def disconnect():
+    global sock
+    for neighbor in neighbors:
+        neighborIP, neighborPORT, neighborEMAIL = neighbor.split(':')
+        neighborPORT = int(neighborPORT)
+        neighborEMAIL = md5.new(neighborEMAIL).digest()
+        packet, _ = buildPacket('\x02', '\x0F', '\x00\x00',  neighborEMAIL, '\x02', '', neighborIP, neighborPORT)
+        sock.sendto(packet, (neighborIP, neighborPORT))
+
 def on_closing(event=None):
+    disconnect()
     sock.close()
-    root.quit()
+    root.destroy()
+    pass
 
 root = Tk()
 
@@ -339,7 +396,7 @@ message_frame = Frame(root)
 my_msg = StringVar()
 my_msg.set('Type your message here.')
 destin_select = StringVar()
-destin_select.set('Destination ip:port')
+destin_select.set('Destination email')
 scrollbar = Scrollbar(message_frame)
 msg_list = Listbox(message_frame, height=15,width=50, yscrollcommand=scrollbar.set)
 scrollbar.pack(side=RIGHT, fill=Y)
@@ -363,11 +420,14 @@ sock.bind((UDP_IP, UDP_PORT))
 init()
 
 receive_thread = Thread(target=parseMessage)
+receive_thread.daemon = True
 receive_thread.start()
 
 routing_table_thread = Thread(target=broadcastRoutingTable)
+routing_table_thread.daemon = True
 routing_table_thread.start()
 
 retransmit_thread = Thread(target=retransmitPacket)
+retransmit_thread.daemon = True
 retransmit_thread.start()
 root.mainloop()
